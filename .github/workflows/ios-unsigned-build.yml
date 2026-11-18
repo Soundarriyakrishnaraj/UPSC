@@ -42,12 +42,15 @@ jobs:
             echo "Runner.app not found!"
             exit 1
           fi
+          echo "Runner.app found successfully."
 
       - name: Package unsigned IPA
         run: |
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
           zip -r Test11-unsigned.ipa Payload
+          test -f Test11-unsigned.ipa
+          echo "IPA created successfully."
           unzip -l Test11-unsigned.ipa | grep "Payload/Runner.app"
 
       - name: Upload unsigned IPA artifact
