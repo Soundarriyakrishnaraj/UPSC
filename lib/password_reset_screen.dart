@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'main.dart';
 
 class PasswordResetScreen extends StatefulWidget {
   const PasswordResetScreen({super.key});
@@ -63,7 +64,10 @@ class _PasswordResetScreenState extends State<PasswordResetScreen> {
               TextButton(
                 onPressed: () {
                   Navigator.of(dialogContext).pop();
-                  Navigator.of(context).popUntil((route) => route.isFirst);
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (context) => const WelcomeScreen()),
+                    (route) => false,
+                  );
                 },
                 child: const Text('Continue'),
               ),

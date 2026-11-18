@@ -1,0 +1,72 @@
+name: iOS Unsigned Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # other permissions are not required for this workflow
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter (stable channel)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Display Flutter version
+        run: flutter --version
+
+      - name: Display Xcode version
+        run: xcodebuild -version
+
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Install CocoaPods dependencies
+        working-directory: ios
+        run: pod install
+
+      - name: Build iOS (unsigned)
+        run: flutter build ios --release --no-codesign
+
+      - name: Verify Runner.app exists
+        run: |
+          if [ ! -d "build/ios/iphoneos/Runner.app" ]; then
+            echo "Runner.app not found!"
+            exit 1
+          fi
+
+      - name: Package unsigned IPA
+        run: |
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -R Runner.app Payload/
+          zip -r ../../../../Test11-unsigned.ipa Payload
+          # Validate that the archive contains Payload/Runner.app
+          unzip -l ../../../../Test11-unsigned.ipa | grep "Payload/Runner.app"
+        shell: bash
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Test11-Unsigned-iOS
+          path: Test11-unsigned.ipa
+
+      # Optional: also upload the Runner.app as a separate zip
+      - name: Zip Runner.app
+        run: |
+          cd build/ios/iphoneos
+          zip -r ../../../../Runner-app.zip Runner.app
+        shell: bash
+
+      - name: Upload Runner.app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Runner-app
+          path: Runner-app.zip

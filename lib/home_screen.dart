@@ -5,6 +5,15 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/theme/app_theme.dart';
+import 'screens/papers_screen.dart';
+import 'screens/admin/admin_papers_screen.dart';
+import 'screens/destination_screen.dart';
+import 'screens/result_screen.dart';
+import 'services/papers_service.dart';
+import 'services/test_service.dart';
+import 'services/pdf_report_service.dart';
+import 'models/test_model.dart';
+import 'main.dart';
 
 // Language names shown in their respective scripts.
 // The keys are saved in Supabase; the values are shown to students.
@@ -49,6 +58,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   int selectedIndex = 0;
   bool showQuoteScreen = true;
   Timer? quoteTimer;
+  bool isAdmin = false;
 
   final List<String> quotes = [
     'Success is the sum of small efforts repeated day in and day out.',
@@ -74,6 +84,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   @override
   void initState() {
     super.initState();
+    _checkAdminStatus();
 
     dailyQuote = quotes[Random().nextInt(quotes.length)];
 
@@ -84,6 +95,17 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         });
       }
     });
+  }
+
+  Future<void> _checkAdminStatus() async {
+    try {
+      final isAdministrator = await PapersService().checkIsAdmin();
+      if (mounted) {
+        setState(() {
+          isAdmin = isAdministrator;
+        });
+      }
+    } catch (_) {}
   }
 
   @override
@@ -104,7 +126,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       await Supabase.instance.client.auth.signOut();
 
       if (!mounted) return;
-      Navigator.of(context).popUntil((route) => route.isFirst);
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const WelcomeScreen()),
+        (route) => false,
+      );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -121,10 +146,14 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      _HomeTab(studentName: studentName, onOpenTab: openTab),
-      const _PapersTab(),
+      _HomeTab(
+        studentName: studentName,
+        onOpenTab: openTab,
+        isAdmin: isAdmin,
+      ),
+      const StudentPapersScreen(),
       const _DestinationTab(),
-      _ProfileTab(onLogout: logout),
+      _ProfileTab(onLogout: logout, isAdmin: isAdmin),
     ];
 
     return Stack(
@@ -315,15 +344,47 @@ class _DailyQuoteScreen extends StatelessWidget {
 // HOME TAB
 // --------------------------------------------------
 
-class _HomeTab extends StatelessWidget {
+class _HomeTab extends StatefulWidget {
   final String studentName;
   final ValueChanged<int> onOpenTab;
+  final bool isAdmin;
 
-  const _HomeTab({required this.studentName, required this.onOpenTab});
+  const _HomeTab({
+    required this.studentName,
+    required this.onOpenTab,
+    this.isAdmin = false,
+  });
+
+  @override
+  State<_HomeTab> createState() => _HomeTabState();
+}
+
+class _HomeTabState extends State<_HomeTab> {
+  final _testSvc = TestService();
+  Map<String, dynamic> _stats = {};
+  bool _statsLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStats();
+  }
+
+  Future<void> _loadStats() async {
+    try {
+      final s = await _testSvc.fetchHomeStats();
+      if (mounted) setState(() { _stats = s; _statsLoaded = true; });
+    } catch (_) {
+      if (mounted) setState(() => _statsLoaded = true);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final firstName = studentName.split(' ').first;
+    final firstName = widget.studentName.split(' ').first;
+    final count     = (_stats['count'] as num? ?? 0).toInt();
+    final best      = (_stats['bestScore'] as num? ?? 0.0).toDouble();
+    final avg       = (_stats['avgScore'] as num? ?? 0.0).toDouble();
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -389,6 +450,32 @@ class _HomeTab extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (widget.isAdmin) ...[
+                        const SizedBox(width: 10),
+                        Tooltip(
+                          message: 'Admin Panel',
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(25),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => const AdminPapersScreen(),
+                                ),
+                              );
+                            },
+                            child: CircleAvatar(
+                              radius: 25,
+                              backgroundColor: AppTheme.pastelPink,
+                              child: const Icon(
+                                Icons.admin_panel_settings_rounded,
+                                color: AppTheme.winePlum,
+                                size: 26,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 26),
@@ -456,7 +543,7 @@ class _HomeTab extends StatelessWidget {
                         ),
                         const SizedBox(height: 20),
                         OutlinedButton.icon(
-                          onPressed: () => onOpenTab(2),
+                          onPressed: () => widget.onOpenTab(2),
                           icon: const Icon(Icons.flag_rounded),
                           label: const Text('Explore Destination'),
                           style: OutlinedButton.styleFrom(
@@ -479,24 +566,23 @@ class _HomeTab extends StatelessWidget {
                   LayoutBuilder(
                     builder: (context, box) {
                       final columns = box.maxWidth >= 700 ? 4 : 2;
-
-                      const stats = [
+                      final stats = [
                         _StatCard(
                           icon: Icons.quiz_outlined,
                           title: 'Tests taken',
-                          value: '0',
-                          note: 'Complete your first test',
+                          value: _statsLoaded ? '$count' : '…',
+                          note: count == 0 ? 'Complete your first test' : '$count completed',
                         ),
                         _StatCard(
                           icon: Icons.emoji_events_outlined,
                           title: 'Best score',
-                          value: '--',
+                          value: _statsLoaded && count > 0 ? '${best.toStringAsFixed(1)}%' : '--',
                           note: 'Your highest score',
                         ),
                         _StatCard(
                           icon: Icons.trending_up_rounded,
-                          title: 'Progress',
-                          value: '0%',
+                          title: 'Avg score',
+                          value: _statsLoaded && count > 0 ? '${avg.toStringAsFixed(1)}%' : '0%',
                           note: 'Keep learning',
                         ),
                         _StatCard(
@@ -732,24 +818,6 @@ class _FaqItemState extends State<_FaqItem> {
 }
 
 // --------------------------------------------------
-// PAPERS TAB
-// --------------------------------------------------
-
-class _PapersTab extends StatelessWidget {
-  const _PapersTab();
-
-  @override
-  Widget build(BuildContext context) {
-    return const _PlaceholderPage(
-      icon: Icons.menu_book_rounded,
-      title: 'Previous Year Papers',
-      description: 'Your UPSC previous-year question papers and answer keys will be organised here.',
-      label: 'Papers module',
-    );
-  }
-}
-
-// --------------------------------------------------
 // DESTINATION TAB
 // --------------------------------------------------
 
@@ -758,96 +826,7 @@ class _DestinationTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const _PlaceholderPage(
-      icon: Icons.flag_rounded,
-      title: 'Your Destination',
-      description:
-          'Your learning journey, practice levels and tests will appear here.',
-      label: 'Test journey',
-    );
-  }
-}
-
-// --------------------------------------------------
-// PLACEHOLDER PAGE
-// --------------------------------------------------
-
-class _PlaceholderPage extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String description;
-  final String label;
-
-  const _PlaceholderPage({
-    required this.icon,
-    required this.title,
-    required this.description,
-    required this.label,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(25),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                height: 90,
-                width: 90,
-                decoration: BoxDecoration(
-                  color: AppTheme.pastelPink,
-                  borderRadius: BorderRadius.circular(25),
-                ),
-                child: Icon(icon, size: 43, color: AppTheme.winePlum),
-              ),
-              const SizedBox(height: 22),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 23,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.winePlum,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                description,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 14,
-                  height: 1.6,
-                  color: AppTheme.dustyMauve,
-                ),
-              ),
-              const SizedBox(height: 20),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 15,
-                  vertical: 9,
-                ),
-                decoration: BoxDecoration(
-                  color: AppTheme.pastelPink,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  '$label • Coming soon',
-                  style: const TextStyle(
-                    color: AppTheme.winePlum,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    return const DestinationScreen();
   }
 }
 
@@ -857,8 +836,9 @@ class _PlaceholderPage extends StatelessWidget {
 
 class _ProfileTab extends StatefulWidget {
   final VoidCallback onLogout;
+  final bool isAdmin;
 
-  const _ProfileTab({required this.onLogout});
+  const _ProfileTab({required this.onLogout, this.isAdmin = false});
 
   @override
   State<_ProfileTab> createState() => _ProfileTabState();
@@ -1527,6 +1507,98 @@ class _ProfileTabState extends State<_ProfileTab> {
                   ),
                 ),
 
+                // ── Test Performance section ──────────────────────
+                const SizedBox(height: 25),
+                const _SectionHeader(
+                  title: 'Test Performance',
+                  subtitle: 'Your examination history',
+                ),
+                const SizedBox(height: 13),
+                _TestHistorySection(),
+
+                if (widget.isAdmin) ...[
+                  const SizedBox(height: 25),
+                  const _SectionHeader(
+                    title: 'Administration',
+                    subtitle: 'Manage papers and application content',
+                  ),
+                  const SizedBox(height: 13),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const AdminPapersScreen(),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [AppTheme.winePlum, Color(0xFF5D3039)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.winePlum.withValues(alpha: 0.25),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: AppTheme.pastelPink,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.admin_panel_settings_rounded,
+                              color: AppTheme.winePlum,
+                              size: 24,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Papers Admin Panel',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  'Upload, publish and edit UPSC papers',
+                                  style: TextStyle(
+                                    color: AppTheme.pastelPink,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(
+                            Icons.arrow_forward_ios_rounded,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
                 const SizedBox(height: 30),
 
                 SizedBox(
@@ -1616,6 +1688,200 @@ class _ProfileInfo extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+
+// --------------------------------------------------
+// TEST HISTORY SECTION (Profile)
+// --------------------------------------------------
+
+class _TestHistorySection extends StatefulWidget {
+  const _TestHistorySection();
+
+  @override
+  State<_TestHistorySection> createState() => _TestHistorySectionState();
+}
+
+class _TestHistorySectionState extends State<_TestHistorySection> {
+  final _svc = TestService();
+  List<TestAttempt> _attempts = [];
+  Map<String, TestModel> _testMap = {};
+  bool _loading = true;
+  bool _generatingPdf = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final attempts = await _svc.fetchMyAttempts(limit: 20);
+      final tests = await _svc.fetchPublishedTests();
+      if (!mounted) return;
+      setState(() {
+        _attempts = attempts;
+        _testMap = {for (final t in tests) t.id: t};
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()));
+    if (_attempts.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppTheme.softRose,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.cherryBlossom),
+        ),
+        child: const Column(children: [
+          Icon(Icons.quiz_outlined, size: 36, color: AppTheme.cherryBlossom),
+          SizedBox(height: 8),
+          Text('No test attempts yet', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.winePlum)),
+          SizedBox(height: 4),
+          Text('Complete a test from the Destination map', style: TextStyle(color: AppTheme.dustyMauve, fontSize: 12)),
+        ]),
+      );
+    }
+
+    return Column(
+      children: _attempts.map((a) {
+        final test = _testMap[a.testId];
+        final pct = a.percentage?.toStringAsFixed(1) ?? '--';
+        final marks = a.marksObtained?.toStringAsFixed(2) ?? '--';
+        final date = a.submittedAt ?? a.startedAt;
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Expanded(
+                    child: Text(
+                      test?.title ?? 'Test',
+                      style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.winePlum, fontSize: 14),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Row(mainAxisSize: MainAxisSize.min, children: List.generate(3, (i) =>
+                    Icon(i < a.starsEarned ? Icons.star_rounded : Icons.star_outline_rounded,
+                        size: 14, color: AppTheme.winePlum))),
+                ]),
+                const SizedBox(height: 4),
+                Text(
+                  '${test?.subject ?? ''}  ·  Attempt #${a.attemptNumber}  ·  ${_fmtDate(date)}',
+                  style: const TextStyle(fontSize: 12, color: AppTheme.dustyMauve),
+                ),
+                const SizedBox(height: 8),
+                Row(children: [
+                  _PillStat(label: 'Score', value: '$pct%'),
+                  const SizedBox(width: 8),
+                  _PillStat(label: 'Marks', value: marks),
+                  const SizedBox(width: 8),
+                  _PillStat(label: '✓', value: '${a.correctCount ?? 0}'),
+                  const SizedBox(width: 8),
+                  _PillStat(label: '✗', value: '${a.incorrectCount ?? 0}'),
+                ]),
+                const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(child: OutlinedButton.icon(
+                    onPressed: test == null ? null : () => Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => ResultScreen(
+                        test: test,
+                        attemptId: a.id,
+                        scoreResult: {
+                          'correct': a.correctCount ?? 0,
+                          'incorrect': a.incorrectCount ?? 0,
+                          'unanswered': a.unansweredCount ?? 0,
+                          'marks_obtained': a.marksObtained ?? 0.0,
+                          'negative_marks': a.negativeMarks ?? 0.0,
+                          'max_marks': a.maxMarks ?? 0.0,
+                          'percentage': a.percentage ?? 0.0,
+                          'stars': a.starsEarned,
+                        },
+                      ),
+                    )),
+                    icon: const Icon(Icons.visibility_outlined, size: 14),
+                    label: const Text('View', style: TextStyle(fontSize: 12)),
+                    style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 36),
+                        padding: const EdgeInsets.symmetric(horizontal: 10)),
+                  )),
+                  const SizedBox(width: 8),
+                  Expanded(child: ElevatedButton.icon(
+                    onPressed: (test == null || _generatingPdf) ? null : () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      setState(() => _generatingPdf = true);
+                      try {
+                        final savedPath = await PdfReportService.savePdfToDownloads(
+                          test: test,
+                          attempt: a,
+                          service: _svc,
+                        );
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text('✓ Report saved to $savedPath'),
+                            backgroundColor: AppTheme.winePlum,
+                          ),
+                        );
+                      } catch (e) {
+                        messenger.showSnackBar(
+                            SnackBar(content: Text('PDF error: $e'), backgroundColor: AppTheme.winePlum));
+                      } finally {
+                        if (mounted) setState(() => _generatingPdf = false);
+                      }
+                    },
+                    icon: const Icon(Icons.picture_as_pdf_rounded, size: 14),
+                    label: const Text('Report', style: TextStyle(fontSize: 12)),
+                    style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(0, 36),
+                        padding: const EdgeInsets.symmetric(horizontal: 10)),
+                  )),
+                ]),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  String _fmtDate(DateTime d) {
+    final l = d.toLocal();
+    return '${l.day}/${l.month}/${l.year}';
+  }
+}
+
+class _PillStat extends StatelessWidget {
+  final String label;
+  final String value;
+  const _PillStat({required this.label, required this.value});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppTheme.alabasterGrey,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.cherryBlossom),
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text(value, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.winePlum)),
+        Text(label, style: const TextStyle(fontSize: 9, color: AppTheme.dustyMauve)),
+      ]),
     );
   }
 }

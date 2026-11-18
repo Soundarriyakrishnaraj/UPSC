@@ -1,9 +1,12 @@
 
 
+
 <manifest 
+    
     xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="upsc_preparation_app"
+        android:label="@string/app_name"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -33,6 +36,17 @@
                     android:host="login-callback" />
             </intent-filter>
         </activity>
+        <receiver
+    android:name=".StreakWidgetProvider"
+    android:exported="false"
+    android:label="Test11 Study Streak">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+        android:name="android.appwidget.provider"
+        android:resource="@xml/widget_streak_info" />
+        </receiver>
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
@@ -41,6 +55,10 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />
             <data android:mimeType="text/plain" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
         </intent>
     </queries>
 </manifest>

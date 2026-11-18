@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'services/streak_service.dart';
 import 'login_screen.dart';
 import 'registration_screen.dart';
 import 'password_reset_screen.dart';
+import 'terms_screen.dart';
 import 'core/theme/app_theme.dart';
 
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
@@ -39,6 +41,7 @@ class _UPSCAppState extends State<UPSCApp> {
 
     authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen(
       (authState) {
+        // Password recovery navigation
         if (authState.event == AuthChangeEvent.passwordRecovery &&
             !isOpeningRecoveryScreen) {
           final navigator = appNavigatorKey.currentState;
@@ -56,6 +59,13 @@ class _UPSCAppState extends State<UPSCApp> {
                   isOpeningRecoveryScreen = false;
                 });
           }
+        }
+
+        // Android Home Screen widget integration
+        if (authState.event == AuthChangeEvent.signedIn) {
+          unawaited(StreakService().updateWidgetCache());
+        } else if (authState.event == AuthChangeEvent.signedOut) {
+          unawaited(StreakService().clearWidgetCache());
         }
       },
       onError: (error, stackTrace) {
@@ -77,8 +87,125 @@ class _UPSCAppState extends State<UPSCApp> {
       debugShowCheckedModeBanner: false,
       title: 'UPSC Preparation',
       theme: AppTheme.lightTheme,
-      home: const WelcomeScreen(),
+      home: const AppAuthGate(),
     );
+  }
+}
+
+// --------------------------------------------------
+// AUTHENTICATION GATE
+// --------------------------------------------------
+
+class AppAuthGate extends StatefulWidget {
+  const AppAuthGate({super.key});
+
+  @override
+  State<AppAuthGate> createState() => _AppAuthGateState();
+}
+
+class _AppAuthGateState extends State<AppAuthGate> {
+  bool _isLoading = true;
+  bool _isAuthenticated = false;
+  bool _hasAcceptedTerms = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkInitialAuth();
+  }
+
+  Future<void> _checkInitialAuth() async {
+    try {
+      final supabase = Supabase.instance.client;
+      var session = supabase.auth.currentSession;
+      var user = supabase.auth.currentUser;
+
+      if (session != null && user != null) {
+        // Refresh expired session
+        if (session.isExpired) {
+          try {
+            final response = await supabase.auth.refreshSession();
+            session = response.session;
+            user = response.user;
+          } catch (refreshError) {
+            debugPrint('Silent refresh fallback: $refreshError');
+          }
+        }
+
+        if (session != null && user != null) {
+          // Check whether the user accepted the current terms version
+          try {
+            final acceptance = await supabase
+                .from('terms_acceptances')
+                .select('id')
+                .eq('user_id', user.id)
+                .eq('terms_version', TermsScreen.termsVersion)
+                .maybeSingle();
+
+            if (!mounted) return;
+
+            setState(() {
+              _isAuthenticated = true;
+              _hasAcceptedTerms = acceptance != null;
+              _isLoading = false;
+            });
+            return;
+          } catch (termsError) {
+            debugPrint('Terms check fallback: $termsError');
+
+            // Preserve existing offline fallback behaviour
+            if (!mounted) return;
+
+            setState(() {
+              _isAuthenticated = true;
+              _hasAcceptedTerms = true;
+              _isLoading = false;
+            });
+            return;
+          }
+        }
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _isAuthenticated = false;
+        _hasAcceptedTerms = false;
+        _isLoading = false;
+      });
+    } catch (error) {
+      debugPrint('Auth initialization exception: $error');
+
+      if (!mounted) return;
+
+      setState(() {
+        _isAuthenticated = false;
+        _hasAcceptedTerms = false;
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: WelcomeColors.background,
+        body: Center(
+          child: CircularProgressIndicator(color: Color(0xFF723D46)),
+        ),
+      );
+    }
+
+    if (_isAuthenticated) {
+      if (_hasAcceptedTerms) {
+        return const StudentHomeScreen();
+      } else {
+        return const TermsScreen();
+      }
+    }
+
+    return const WelcomeScreen();
   }
 }
 

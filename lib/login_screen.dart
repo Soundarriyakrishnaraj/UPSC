@@ -89,14 +89,14 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       if (acceptance == null) {
-        Navigator.pushReplacement(
-          context,
+        Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (context) => const TermsScreen()),
+          (route) => false,
         );
       } else {
-        Navigator.pushReplacement(
-          context,
+        Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (context) => const StudentHomeScreen()),
+          (route) => false,
         );
       }
     } on FunctionException catch (error) {
